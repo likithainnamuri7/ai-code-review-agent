@@ -1,31 +1,136 @@
-# Production-code-review-agent
-Production-code-review-agent
-Overview CodeSentinel is an end-to-end ML system that automates code review at the pull request level. The core pipeline combines a three-stage hybrid retrieval system with a QLoRA fine-tuned CodeLlama-7B model served via vLLM, orchestrated through a LangGraph ReAct agent that can execute code, run tests, check CVEs, and apply static analysis — all within a bounded 30-second execution budget. Reviews are posted natively to GitHub as structured review objects with inline comments, severity badges (critical / warning / info), and generated fix patches. A CI-gated evaluation harness enforces F1, false positive rate, and latency thresholds before any model update ships to production.
+# AI Code Review Agent
 
-Key Features
+A production-style automated code review service that analyzes GitHub repositories
+and pull requests using AI — returning structured findings, scores, and inline suggestions.
 
-1.Hybrid RAG retrieval — BM25 sparse search (Elasticsearch) + dense FAISS retrieval (CodeBERT embeddings) + cross-encoder reranking, producing a 4k-token context window of the most relevant codebase snippets.
+## What It Does
 
-2.QLoRA fine-tuned model — CodeLlama-7B trained on 50,000 real GitHub PR + review pairs using 4-bit NF4 quantization; served via vLLM with speculative decoding for ~3× throughput.
+Paste any GitHub repo or PR URL → the agent fetches the diff, runs parallel
+analysis across 6 categories, and returns a scored review with actionable findings.
 
-3.Multi-head analysis — four parallel inference calls covering bug detection, performance, security (OWASP Top 10), and code quality; all outputs schema-constrained via outlines
+## Features
 
-4.Agentic tool-use — LangGraph ReAct loop with E2B sandboxed code execution, pytest/jest test running, CVE lookup, semgrep static analysis, and type checking
+- **6 parallel analyzers** — bug detection, security, performance, style, complexity, best practices
+- **Hybrid analysis pipeline** — regex + AST + Groq LLM (via LiteLLM)
+- **RAG-enhanced reviews** — ChromaDB vector store for context-aware suggestions
+- **0–100 scoring engine** — severity-weighted verdict per file and overall
+- **GitHub integration** — reviews latest commit or a specific PR number
+- **Inline comment posting** — posts findings directly as GitHub PR comments
+- **Semantic caching** — Redis-based cache to avoid redundant LLM calls
+- **Graceful degradation** — falls back to rule-based analysis if LLM is unavailable
 
-5.Structured GitHub reviews — posts native review objects with APPROVE, COMMENT, or REQUEST_CHANGES events determined automatically by finding severity
+## Tech Stack
 
-6.CI-gated eval pipeline — F1 ≥ 0.82, FPR ≤ 8%, and p95 latency ≤ 45s enforced as merge gates; Prometheus time-series for regression trend detection
+- **Backend**: Python, FastAPI
+- **AI Orchestration**: LangGraph, LiteLLM, Groq API
+- **Vector Store**: ChromaDB
+- **Cache**: Redis
+- **Database**: PostgreSQL (asyncpg)
+- **Observability**: OpenTelemetry
 
-6.Full observability — per-trace LLM observability via Langfuse, Grafana dashboards, and PagerDuty SLA alerts
+## Project Structure
+src/
 
-Tech Stack LayerTechnologyAPI serverFastAPI · uvicorn Webhook securityHMAC SHA-256 signature validation Code parsingtree-sitter 0.22 · unidiff · gitpython Sparse retrievalElasticsearch 8.x Dense retrievalfaiss-gpu · microsoft/codebert-base Rerankingcross-encoder/ms-marco-MiniLM-L-6-v2 Base modelcodellama/CodeLlama-7b-Instruct-hf Fine-tuningtrl · peft · bitsandbytes Training accelerationDeepSpeed ZeRO-2 Inference servervllm 0.4+ with PagedAttention Structured outputoutlines Agentic frameworkLangGraph 0.1+ Code sandboxE2B Static analysissemgrep · bandit · eslint Type checkingmypy · tsc LLM observabilityLangfuse MetricsPrometheus · Grafana Alerting PagerDuty Containerization Docker · Docker Compose Orchestration Kubernetes
+main.py                  # FastAPI entry point
 
-Prerequisites: Python 3.11+ Docker and Docker Compose NVIDIA GPU with CUDA 12.1+ (CPU-only mode is not supported at production throughput targets) A GitHub App with pull_requests: write and contents: read permissions API credentials: GITHUB_APP_PRIVATE_KEY, E2B_API_KEY, BRAVE_SEARCH_API_KEY, LANGFUSE_SECRET_KEY
+api/
 
-Contributing
+webhook.py             # POST /review, POST /webhook/github
 
-Fork the repository and create a feature branch: git checkout -b feat/your-feature Make your changes and write tests for new behaviour Run the test suite: pytest tests/ -v Run a quick eval to confirm no regressions: python eval/harness.py --quick Open a pull request — CodeSentinel will review its own PR
+orchestration/
 
-License This project is licensed under the MIT License. See LICENSE for details.
+graph.py               # Core LangGraph review engine
 
-Built with CodeLlama · HuggingFace · LangGraph · FAISS · FastAPI · vLLM · Langfuse · Grafana
+analysis/
+
+bug_detection.py
+
+security.py
+
+performance.py
+
+style.py
+
+complexity.py
+
+best_practices.py
+
+llm_analyzer.py        # Groq LLM-based analyzer
+
+ingestion/
+
+diff.py                # Unified diff parser
+
+rag/
+
+vector_store.py        # ChromaDB + embeddings
+
+output/
+
+scoring.py             # Score aggregation
+
+github_comment.py      # PR comment posting
+
+cache/
+
+semantic_cache.py      # Redis semantic cache
+
+observability/           # OpenTelemetry tracing
+
+## Setup
+
+### 1. Clone & Install
+
+```bash
+git clone https://github.com/likithainnamuri7/Production-code-review-agent
+cd Production-code-review-agent
+pip install -r requirements.txt
+```
+
+### 2. Environment Variables
+
+Copy `.env.example` to `.env` and fill in:
+
+
+### 3. Run
+
+```bash
+uvicorn src.main:app --reload --port 8000
+```
+
+Open `http://localhost:8000`
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/review` | Submit repo/PR for review |
+| `POST` | `/webhook/github` | GitHub webhook receiver |
+| `GET`  | `/health` | Health check |
+
+### Request Example
+
+```json
+POST /review
+{
+  "repo": "owner/repo",
+  "pr_number": 42
+}
+```
+
+Set `pr_number: 0` to review the latest commit on the default branch.
+
+## Review Flow
+
+1. User pastes GitHub URL → frontend extracts `owner/repo`
+2. Backend fetches diff from GitHub API
+3. Diff parsed into hunks → routed to 6 parallel analyzers
+4. Rule-based + LLM analysis runs concurrently
+5. Results aggregated → 0–100 score computed
+6. Frontend renders score ring, findings, and file links
+
+## Notes
+
+- Accepts bare repo URLs (reviews latest commit) or specific PR URLs
+- File links resolve via `sha → branch → baseBranch → main` fallback to avoid 404s
+- LLM analysis uses Groq (fast inference); falls back to regex/AST if unavailable
