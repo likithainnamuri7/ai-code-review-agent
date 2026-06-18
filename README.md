@@ -113,8 +113,7 @@ Open `http://localhost:8000`
 ```json
 POST /review
 {
-  "repo": "owner/repo",
-  "pr_number": 42
+  "repo": "owner/repo"
 }
 ```
 
